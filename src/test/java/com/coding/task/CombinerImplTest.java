@@ -1,9 +1,9 @@
 package com.coding.task;
 
+import com.beust.jcommander.internal.Lists;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
 
-import java.util.Random;
 import java.util.concurrent.*;
 
 /**
@@ -13,7 +13,6 @@ public class CombinerImplTest {
 
     private static final int DEFAULT_CAPACITY = 10;
 
-    private Combiner<Message> messageCombiner;
     private Producer producerA;
     private Producer producerB;
     private Consumer consumer;
@@ -22,38 +21,42 @@ public class CombinerImplTest {
     public void beforeMethod() {
         BlockingQueue<Message> inputQueueA = new ArrayBlockingQueue<>(DEFAULT_CAPACITY);
         BlockingQueue<Message> inputQueueB = new LinkedBlockingQueue<>(DEFAULT_CAPACITY);
-        this.producerA = new Producer("A", inputQueueA);
-        this.producerB = new Producer("B", inputQueueB);
+        this.producerA = new Producer("A", inputQueueA, 10, 10);
+        this.producerB = new Producer("B", inputQueueB, 100, 10);
 
         SynchronousQueue<Message> outputQueue = new SynchronousQueue<>();
         this.consumer = new Consumer(outputQueue);
-
-        this.messageCombiner = CombinerImpl.createAndStart(outputQueue);
     }
 
     @Test
-    public void test(){
+    public void test() {
         try {
-            this.messageCombiner.addInputQueue(producerA.getInputQueue(), 9.5, 10, TimeUnit.SECONDS);
-            this.messageCombiner.addInputQueue(producerB.getInputQueue(), 0.5, 10, TimeUnit.SECONDS);
+            Combiner<Message> messageCombiner = CombinerImpl.createStarted(consumer.getOutputQueue());
+
+            messageCombiner.addInputQueue(producerA.getInputQueue(), 9.5, 100, TimeUnit.MILLISECONDS);
+            messageCombiner.addInputQueue(producerB.getInputQueue(), 0.5, 1, TimeUnit.MINUTES);
 
             new Thread(consumer).start();
 
-            new Thread(producerA).start();
-            new Thread(producerB).start();
-        } catch (Combiner.CombinerException e) {
+            ExecutorService executorService = Executors.newFixedThreadPool(2);
+            executorService.invokeAll(Lists.newArrayList(producerA, producerB));
+        } catch (Combiner.CombinerException | InterruptedException e) {
             e.printStackTrace();
         }
     }
 
-    private class Producer implements Runnable {
+    private class Producer implements Callable<Void> {
 
         private final String type;
         private final BlockingQueue<Message> inputQueue;
+        private final int numbOfElements;
+        private final long sleep;
 
-        private Producer(String type, BlockingQueue<Message> inputQueue) {
+        private Producer(String type, BlockingQueue<Message> inputQueue, int numbOfElements, long sleep) {
             this.type = type;
             this.inputQueue = inputQueue;
+            this.numbOfElements = numbOfElements;
+            this.sleep = sleep;
         }
 
         public String getType() {
@@ -65,15 +68,18 @@ public class CombinerImplTest {
         }
 
         @Override
-        public void run() {
-            for (int i =0; i < 10; i++){
+        public Void call() {
+            for (int i = 0; i < numbOfElements; i++) {
                 try {
-                    Thread.sleep(ThreadLocalRandom.current().nextLong(1500));
-                    inputQueue.offer(new Message(type, i));
+                    if (sleep != 0) {
+                        Thread.sleep(sleep);
+                    }
+                    this.inputQueue.put(new Message(type, i));
                 } catch (InterruptedException e) {
                     e.printStackTrace();
                 }
             }
+            return null;
         }
     }
 
@@ -87,19 +93,18 @@ public class CombinerImplTest {
 
         @Override
         public void run() {
-            while (true){
+            while (true) {
                 try {
-                    Message message = this.outputQueue.poll(1, TimeUnit.MINUTES);
-
-                    if (message == null){
-                        return;
-                    }
-
+                    Message message = this.outputQueue.take();
                     System.out.println(message);
                 } catch (InterruptedException e) {
                     e.printStackTrace();
                 }
             }
+        }
+
+        public SynchronousQueue<Message> getOutputQueue() {
+            return outputQueue;
         }
     }
 
