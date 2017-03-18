@@ -3,7 +3,6 @@ package com.coding.task;
 /**
  * Please implement this interface.
  */
-
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.TimeUnit;

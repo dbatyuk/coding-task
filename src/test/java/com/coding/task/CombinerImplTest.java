@@ -1,111 +1,104 @@
 package com.coding.task;
 
-import com.beust.jcommander.internal.Lists;
-import org.testng.annotations.BeforeMethod;
+import com.coding.task.Combiner.CombinerException;
+import org.mockito.Mockito;
 import org.testng.annotations.Test;
 
-import java.util.concurrent.*;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.SynchronousQueue;
+import java.util.concurrent.TimeUnit;
+
+import static org.testng.Assert.fail;
 
 /**
- * Created by dbatyuk on 28.02.2017.
+ * Created by dbatyuk on 18.03.2017.
  */
 public class CombinerImplTest {
 
-    private static final int DEFAULT_CAPACITY = 10;
-
-    private Producer producerA;
-    private Producer producerB;
-    private Consumer consumer;
-
-    @BeforeMethod
-    public void beforeMethod() {
-        BlockingQueue<Message> inputQueueA = new ArrayBlockingQueue<>(DEFAULT_CAPACITY);
-        BlockingQueue<Message> inputQueueB = new LinkedBlockingQueue<>(DEFAULT_CAPACITY);
-        this.producerA = new Producer("A", inputQueueA, 10, 10);
-        this.producerB = new Producer("B", inputQueueB, 100, 10);
-
-        SynchronousQueue<Message> outputQueue = new SynchronousQueue<>();
-        this.consumer = new Consumer(outputQueue);
+    @Test(expectedExceptions = IllegalArgumentException.class, expectedExceptionsMessageRegExp = "outputQueue can't be null")
+    public void testCreateNullOutputQueue() {
+        CombinerImpl.createStarted(null);
+        fail();
     }
 
-    @Test
-    public void test() {
-        try {
-            Combiner<Message> messageCombiner = CombinerImpl.createStarted(consumer.getOutputQueue());
-
-            messageCombiner.addInputQueue(producerA.getInputQueue(), 9.5, 100, TimeUnit.MILLISECONDS);
-            messageCombiner.addInputQueue(producerB.getInputQueue(), 0.5, 1, TimeUnit.MINUTES);
-
-            new Thread(consumer).start();
-
-            ExecutorService executorService = Executors.newFixedThreadPool(2);
-            executorService.invokeAll(Lists.newArrayList(producerA, producerB));
-        } catch (Combiner.CombinerException | InterruptedException e) {
-            e.printStackTrace();
-        }
+    @Test(expectedExceptions = IllegalArgumentException.class, expectedExceptionsMessageRegExp = "combiner can't be null")
+    public void testStopNullCombiner() {
+        CombinerImpl.stop(null);
+        fail();
     }
 
-    private class Producer implements Callable<Void> {
-
-        private final String type;
-        private final BlockingQueue<Message> inputQueue;
-        private final int numbOfElements;
-        private final long sleep;
-
-        private Producer(String type, BlockingQueue<Message> inputQueue, int numbOfElements, long sleep) {
-            this.type = type;
-            this.inputQueue = inputQueue;
-            this.numbOfElements = numbOfElements;
-            this.sleep = sleep;
-        }
-
-        public String getType() {
-            return type;
-        }
-
-        public BlockingQueue<Message> getInputQueue() {
-            return inputQueue;
-        }
-
-        @Override
-        public Void call() {
-            for (int i = 0; i < numbOfElements; i++) {
-                try {
-                    if (sleep != 0) {
-                        Thread.sleep(sleep);
-                    }
-                    this.inputQueue.put(new Message(type, i));
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
-                }
-            }
-            return null;
-        }
+    @Test(expectedExceptions = IllegalArgumentException.class, expectedExceptionsMessageRegExp = "combiner should be instance of CombinerImpl")
+    public void testStopNotCombinerImpl() {
+        Combiner combiner = Mockito.mock(Combiner.class);
+        CombinerImpl.stop(combiner);
+        fail();
     }
 
-    private class Consumer implements Runnable {
+    @Test(expectedExceptions = IllegalArgumentException.class, expectedExceptionsMessageRegExp = "combiner already stopped")
+    public void testStopAlreadyStopped() {
+        SynchronousQueue<TestMessage> synchronousQueue = new SynchronousQueue<>();
 
-        private final SynchronousQueue<Message> outputQueue;
-
-        private Consumer(SynchronousQueue<Message> outputQueue) {
-            this.outputQueue = outputQueue;
-        }
-
-        @Override
-        public void run() {
-            while (true) {
-                try {
-                    Message message = this.outputQueue.take();
-                    System.out.println(message);
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
-                }
-            }
-        }
-
-        public SynchronousQueue<Message> getOutputQueue() {
-            return outputQueue;
-        }
+        Combiner combiner = CombinerImpl.createStarted(synchronousQueue);
+        CombinerImpl.stop(combiner);
+        CombinerImpl.stop(combiner);
+        fail();
     }
 
+    @Test(expectedExceptions = IllegalArgumentException.class, expectedExceptionsMessageRegExp = "queue can't be null")
+    public void testAddQueueNull() throws CombinerException {
+        SynchronousQueue<TestMessage> synchronousQueue = new SynchronousQueue<>();
+
+        Combiner combiner = CombinerImpl.createStarted(synchronousQueue);
+        combiner.addInputQueue(null, 10, 20, TimeUnit.DAYS);
+        fail();
+    }
+
+    @Test(expectedExceptions = IllegalArgumentException.class, expectedExceptionsMessageRegExp = "priority should be more than 0")
+    public void testAddNegativePriority() throws CombinerException {
+        SynchronousQueue<TestMessage> synchronousQueue = new SynchronousQueue<>();
+
+        BlockingQueue<TestMessage> blockingQueue = new LinkedBlockingQueue<>();
+        Combiner combiner = CombinerImpl.createStarted(synchronousQueue);
+        combiner.addInputQueue(blockingQueue, -1, 20, TimeUnit.DAYS);
+        fail();
+    }
+
+    @Test(expectedExceptions = IllegalArgumentException.class, expectedExceptionsMessageRegExp = "isEmptyTimeout should be more than 0")
+    public void testAddZeroTimeout() throws CombinerException {
+        SynchronousQueue<TestMessage> synchronousQueue = new SynchronousQueue<>();
+
+        BlockingQueue<TestMessage> blockingQueue = new LinkedBlockingQueue<>();
+        Combiner combiner = CombinerImpl.createStarted(synchronousQueue);
+        combiner.addInputQueue(blockingQueue, 5, 0, TimeUnit.DAYS);
+        fail();
+    }
+
+    @Test(expectedExceptions = IllegalArgumentException.class, expectedExceptionsMessageRegExp = "timeUnit can't be null")
+    public void testAddNullTimeUnit() throws CombinerException {
+        SynchronousQueue<TestMessage> synchronousQueue = new SynchronousQueue<>();
+
+        BlockingQueue<TestMessage> blockingQueue = new LinkedBlockingQueue<>();
+        Combiner combiner = CombinerImpl.createStarted(synchronousQueue);
+        combiner.addInputQueue(blockingQueue, 5, 10, null);
+        fail();
+    }
+
+    @Test(expectedExceptions = IllegalArgumentException.class, expectedExceptionsMessageRegExp = "queue can't be null")
+    public void testRemoveQueueNull() throws CombinerException {
+        SynchronousQueue<TestMessage> synchronousQueue = new SynchronousQueue<>();
+
+        Combiner combiner = CombinerImpl.createStarted(synchronousQueue);
+        combiner.removeInputQueue(null);
+        fail();
+    }
+
+    @Test(expectedExceptions = IllegalArgumentException.class, expectedExceptionsMessageRegExp = "queue can't be null")
+    public void testHasQueueNull() throws CombinerException {
+        SynchronousQueue<TestMessage> synchronousQueue = new SynchronousQueue<>();
+
+        Combiner combiner = CombinerImpl.createStarted(synchronousQueue);
+        combiner.hasInputQueue(null);
+        fail();
+    }
 }
